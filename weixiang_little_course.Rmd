@@ -1,0 +1,230 @@
+---
+title: "weixiang wang's little course"
+output: html_notebook
+---
+```{r}
+##下载Rstudio
+```
+
+```{r}
+##""" transfer Gene name into refseqID """
+```
+
+```{r}
+##载入你的基因名称
+gene_name<-read.table("/Users/lid/Desktop/gene_name.txt",header=F)
+gene_symbol<-as.character(gene_name$V1)
+gene_symbol
+```
+
+```{r}
+##安装包:BiocManager（包管理作用）、biomaRt（在线数据库整合:Ensembl,Uniprot和HapMap的R接口）
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("biomaRt")
+```
+
+```{r}
+##载入包"biomaRt",罗列在线数据库（ensembl数据库）
+library("biomaRt")
+listMarts()
+```
+```{r}
+##利用第一个数据库,罗列第一个数据库拥有的物种数据集
+my_mart<-useMart("ENSEMBL_MART_ENSEMBL")
+listDatasets(my_mart)
+```
+
+```{r}
+##选择你想要的物种，这里以老鼠为例，罗列老鼠数据集里面拥有的数据情况
+my_dataset<-useDataset("mmusculus_gene_ensembl",mart = my_mart)
+listAttributes(my_dataset)
+```
+```{r}
+##获得想要的数据
+result<-getBM(attributes = c("mgi_symbol","ensembl_transcript_id","refseq_mrna","description"),filter = "mgi_symbol",values = gene_symbol,mart = my_dataset)
+result
+```
+```{r}
+##有的基因名有多个名字,你指定的基因名在数据库没有找到对应的条目，这里获得没有条目的那些基因名
+gene_1<-tolower(gene_symbol)
+gene_2<-tolower(result[!duplicated(result$mgi_symbol),]$mgi_symbol)
+subset(as.data.frame(gene_symbol),tolower(as.data.frame(gene_symbol)$gene_symbol)%in%setdiff(gene_1, gene_2))
+##你可以在txt文件中更改这些基因名称后重新运行代码以保证你想要的基因都能找到对应的条目
+```
+```{r}
+##将转换的结果保存到指定文件
+write.csv(result,file = "/Users/lid/Desktop/result.csv",row.names = F)
+```
+
+```{r}
+##"""KEGG and GO"""
+```
+
+```{r}
+##读取基因名称
+gene_symbol2<-read.table("/Users/lid/Desktop/gene_name_go.txt",header = F)
+gene_symbol2<-as.character(gene_symbol2$V1)
+```
+
+```{r}
+##安装包:BiocManager（包管理作用）、org.Hs.eg.db(人类:Map Entrez Gene identifiers to GenBank Accession Numbers,来自AnnotationDbi---Annotation Database Interface)
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("org.Hs.eg.db")
+```
+
+```{r}
+##载入包org.Hs.eg.db、了解包
+library(org.Hs.eg.db)
+ls("package:org.Hs.eg.db")
+columns(org.Hs.eg.db)
+```
+```{r}
+##获得基因名的ENTREZID
+gene_identifiers<-select(org.Hs.eg.db,keys=gene_symbol2,columns=c("ENTREZID","ENSEMBL"),keytype="SYMBOL")
+gene_identifiers
+```
+```{r}
+##安装包ClusterProfiler
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("clusterProfiler")
+```
+
+```{r}
+##加载包clusterProfiler（富集分析）、org.Hs.eg.db（注释信息）
+library(clusterProfiler)
+library(org.Hs.eg.db)
+```
+
+```{r}
+##去除重复的ENTREZID
+ENTREZID <- gene_identifiers[!duplicated(gene_identifiers$ENTREZID),]$ENTREZID
+```
+
+```{r}
+##GO分析：可以分开分别得到 BP CC MF 的结果，也可以使用ALL获得所有结果
+GOresult<-enrichGO( gene          = ENTREZID ,
+                    OrgDb         = org.Hs.eg.db,
+                    keyType       = "ENTREZID",
+                    ont           = "ALL",
+                    pAdjustMethod = "BH",
+                    pvalueCutoff  = 0.1,
+                    qvalueCutoff  = 0.1,
+                    readable = T)
+        # universe = background geneset default:all gene（related to p-value calculating） 
+        # keytype  = ENSEMBL ENTREZID SYMBOL 见columns(org.Hs.eg.db) 所列项目
+        # ont      = BP CC MF 
+        # gene     = DEG or target gene
+        # OrgDb    = 注释包来源物种水平的AnnotationDbi Hub
+        # pAdjustMethod = p值调整方法 BH
+        # p、q value 阀值
+        # readable = T 以gene symbol的形式显示基因名称
+##结果说明：包含BP CC MF 三个条目，由于GO是无环图，边缘之间的关系为父与子，所以结果是冗余的
+```
+
+```{r}
+GOresult@result
+```
+
+```{r}
+##GO分析，使ont='BP'下的条目结果
+BPresult<-enrichGO( gene          = ENTREZID ,
+                    OrgDb         = org.Hs.eg.db,
+                    keyType       = "ENTREZID",
+                    ont           = "BP",
+                    pAdjustMethod = "BH",
+                    pvalueCutoff  = 0.05,
+                    qvalueCutoff  = 0.05,
+                    readable      = T)
+##结果说明：包含BP条目，GO是无环图，边缘之间的关系为父与子，结果是冗余的
+##官方说明中强调可以使用simplify来给enrichGO的结果去冗余，但是我运行了很久都没有成功
+```
+
+```{r}
+##简化函数,返回值:更新enrichGO的结果,未成功
+simplify(BPresult, cutoff = 0.7, by = "p.adjust", select_fun = min, measure = "Wang", semData = NULL)
+```
+
+```{r}
+BPresult@result
+```
+
+```{r}
+##GO结果可视化
+library(enrichplot)
+library(ggplot2)
+barplot(GOresult,showCategory=30,color="qvalue")+ggtitle("barplot GO total result")+ggsave(filename = "/Users/lid/Desktop/1222_teach/数据/GO_KEGG/totalGO.pdf",height = 6,width = 9)
+```
+
+```{r}
+barplot(BPresult,showCategory=15,color="pvalue")+ggtitle("barplot GO BP result")+ggsave(filename = "/Users/lid/Desktop/1222_teach/数据/GO_KEGG/BPGO.pdf",height = 6,width = 9)
+```
+
+
+```{r}
+##KEGG分析：
+KEGGresult <- enrichKEGG(ENTREZID,
+                         organism = "hsa", 
+                         keyType  = "ncbi-geneid",
+                         pvalueCutoff  = 0.5, 
+                         pAdjustMethod = "BH",
+                         qvalueCutoff  = 0.5)
+```
+
+```{r}
+KEGGresult@result
+```
+
+
+```{r}
+##KEGG可视化
+dotplot(KEGGresult, showCategory=15,color="pvalue")+scale_color_continuous(low="purple",high="green")+ggsave(filename = "/Users/lid/Desktop/1222_teach/数据/GO_KEGG/total_KEGG.pdf",width = 8,height = 6)
+```
+```{r}
+##MKEGG分析
+MKEGGresult <- enrichMKEGG(ENTREZID,
+                         organism = "hsa", 
+                         keyType  = "ncbi-geneid",
+                         pvalueCutoff  = 0.81, 
+                         pAdjustMethod = "BH",
+                         qvalueCutoff  = 0.81)
+```
+
+```{r}
+MKEGGresult@result
+```
+
+```{r}
+##MKEGG可视化
+dotplot(MKEGGresult, showCategory=10,color="pvalue")+scale_color_continuous(low="purple",high="green")+ggsave(filename = "/Users/lid/Desktop/1222_teach/数据/GO_KEGG/total_MKEGG.pdf",width = 15,height = 6)
+```
+
+```{r}
+##保存GO富集结果
+write.csv(GOresult@result,"/Users/lid/Desktop/1222_teach/数据/GO_KEGG/total_go.csv")
+write.csv(BPresult@result,"/Users/lid/Desktop/1222_teach/数据/GO_KEGG/BP_go.csv")
+write.csv(subset(BPresult@result,BPresult@result$qvalue<0.2),"/Users/lid/Desktop/1222_teach/数据/GO_KEGG/BP_go_0_2cutoff.csv")
+```
+
+```{r}
+##使KEGG结果可读,将gene id 转换为gene symbol
+KEGGresult<-setReadable(KEGGresult, 'org.Hs.eg.db',"ENTREZID")
+MKEGGresult<-setReadable(MKEGGresult, 'org.Hs.eg.db',"ENTREZID")
+```
+```{r}
+##保存KEGG富集结果
+write.csv(KEGGresult@result,"/Users/lid/Desktop/1222_teach/数据/GO_KEGG/KEGG.csv")
+write.csv(subset(KEGGresult@result,KEGGresult@result$qvalue<0.5),"/Users/lid/Desktop/1222_teach/数据/GO_KEGG/KEGG_0_5cutoff.csv")
+write.csv(MKEGGresult@result,"/Users/lid/Desktop/1222_teach/数据/GO_KEGG/MKEGG.csv")
+write.csv(subset(MKEGGresult@result,MKEGGresult@result$qvalue<0.85),"/Users/lid/Desktop/1222_teach/数据/GO_KEGG/MKEGG_0_85cutoff.csv")
+```
+
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file). 
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+
